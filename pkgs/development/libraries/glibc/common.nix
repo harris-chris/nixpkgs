@@ -43,9 +43,9 @@
 } @ args:
 
 let
-  version = "2.35";
+  version = "2.17";
   patchSuffix = "-224";
-  sha256 = "sha256-USNzL2tnzNMZMF79OZlx1YWSEivMKmUYob0lEN0M9S4=";
+  sha256 = "sha256-aRTjN0AeDgreI2lOGyxSpfCeTtoycMZ+fDupOom1sj4=";
 in
 
 assert withLinuxHeaders -> linuxHeaders != null;
@@ -57,102 +57,55 @@ stdenv.mkDerivation ({
   enableParallelBuilding = true;
 
   patches =
-    [
-      /* No tarballs for stable upstream branch, only https://sourceware.org/git/glibc.git and using git would complicate bootstrapping.
-          $ git fetch --all -p && git checkout origin/release/2.35/master && git describe
-          glibc-2.35-210-ge123f08ad5
-          $ git show --minimal --reverse glibc-2.35.. | gzip -9n --rsyncable - > 2.35-master.patch.gz
-
-         To compare the archive contents zdiff can be used.
-          $ zdiff -u 2.35-master.patch.gz ../nixpkgs/pkgs/development/libraries/glibc/2.35-master.patch.gz
-       */
-      ./2.35-master.patch.gz
+    [ /* Have rpcgen(1) look for cpp(1) in $PATH.  */
+      ./rpcgen-path.patch
+      ./fix-simver.patch
+      ./fix-obstack.patch
 
       /* Allow NixOS and Nix to handle the locale-archive. */
       ./nix-locale-archive.patch
 
-      /* Don't use /etc/ld.so.cache, for non-NixOS systems.  */
+      /* Don't use /etc/ld.so.cache, for non-NixOS systems.  Currently
+         disabled on GNU/Hurd, which uses a more recent libc snapshot. */
       ./dont-use-system-ld-so-cache.patch
 
-      /* Don't use /etc/ld.so.preload, but /etc/ld-nix.so.preload.  */
-      ./dont-use-system-ld-so-preload.patch
+      /* Without this patch many KDE binaries crash. */
+      ./glibc-elf-localscope.patch
 
-      /* The command "getconf CS_PATH" returns the default search path
-         "/bin:/usr/bin", which is inappropriate on NixOS machines. This
-         patch extends the search path by "/run/current-system/sw/bin". */
-      ./fix_path_attribute_in_getconf.patch
+      /* Add blowfish password hashing support.  This is needed for
+         compatibility with old NixOS installations (since NixOS used
+         to default to blowfish). */
+      ./glibc-crypt-blowfish.patch
 
-      ./fix-x64-abi.patch
+      /* Fix for random "./sysdeps/posix/getaddrinfo.c:1467:
+         rfc3484_sort: Assertion `src->results[i].native == -1 ||
+         src->results[i].native == a2_native' failed." crashes. */
+      ./glibc-rh739743.patch
+    ];
 
-      /* https://github.com/NixOS/nixpkgs/pull/137601 */
-      ./nix-nss-open-files.patch
+  postPatch = ''
+    # Needed for glibc to build with the gnumake 3.82
+    # http://comments.gmane.org/gmane.linux.lfs.support/31227
+    sed -i 's/ot \$/ot:\n\ttouch $@\n$/' manual/Makefile
+    sed -i 's/3.\[89\]\*/3.[89]* | 4.*/' configure
 
-      ./0001-Revert-Remove-all-usage-of-BASH-or-BASH-in-installed.patch
-    ]
-    ++ lib.optional stdenv.hostPlatform.isMusl ./fix-rpc-types-musl-conflicts.patch
-    ++ lib.optional stdenv.buildPlatform.isDarwin ./darwin-cross-build.patch;
-
-  postPatch =
-    ''
-      # Needed for glibc to build with the gnumake 3.82
-      # http://comments.gmane.org/gmane.linux.lfs.support/31227
-      sed -i 's/ot \$/ot:\n\ttouch $@\n$/' manual/Makefile
-
-      # nscd needs libgcc, and we don't want it dynamically linked
-      # because we don't want it to depend on bootstrap-tools libs.
-      echo "LDFLAGS-nscd += -static-libgcc" >> nscd/Makefile
-
-      # Ensure that `__nss_files_fopen` can still be wrapped by `libredirect`.
-      sed -i -e '/libc_hidden_def (__nss_files_fopen)/d' nss/nss_files_fopen.c
-      sed -i -e '/libc_hidden_proto (__nss_files_fopen)/d' include/nss_files.h
-    ''
-    # FIXME: find a solution for infinite recursion in cross builds.
-    # For now it's hopefully acceptable that IDN from libc doesn't reliably work.
-    + lib.optionalString (stdenv.hostPlatform == stdenv.buildPlatform) ''
-
-      # Ensure that libidn2 is found.
-      patch -p 1 <<EOF
-      --- a/inet/idna.c
-      +++ b/inet/idna.c
-      @@ -25,1 +25,1 @@
-      -#define LIBIDN2_SONAME "libidn2.so.0"
-      +#define LIBIDN2_SONAME "${lib.getLib libidn2}/lib/libidn2.so.0"
-      EOF
-    '';
+    # nscd needs libgcc, and we don't want it dynamically linked
+    # because we don't want it to depend on bootstrap-tools libs.
+    echo "LDFLAGS-nscd += -static-libgcc" >> nscd/Makefile
+  '';
 
   configureFlags =
     [ "-C"
       "--enable-add-ons"
+      "--enable-obsolete-rpc"
       "--sysconfdir=/etc"
-      "--enable-stack-protector=strong"
-      "--enable-bind-now"
-      (lib.withFeatureAs withLinuxHeaders "headers" "${linuxHeaders}/include")
-      (lib.enableFeature profilingLibraries "profile")
-    ] ++ lib.optionals (stdenv.hostPlatform.isx86 || stdenv.hostPlatform.isAarch64) [
-      # This feature is currently supported on
-      # i386, x86_64 and x32 with binutils 2.29 or later,
-      # and on aarch64 with binutils 2.30 or later.
-      # https://sourceware.org/glibc/wiki/PortStatus
-      "--enable-static-pie"
-    ] ++ lib.optionals stdenv.hostPlatform.isx86 [
-      # Enable Intel Control-flow Enforcement Technology (CET) support
-      "--enable-cet"
-    ] ++ lib.optionals withLinuxHeaders [
-      "--enable-kernel=3.10.0" # RHEL 7 and derivatives, seems oldest still supported kernel
-    ] ++ lib.optionals (stdenv.hostPlatform != stdenv.buildPlatform) [
-      (lib.flip lib.withFeature "fp"
-         (stdenv.hostPlatform.gcc.float or (stdenv.hostPlatform.parsed.abi.float or "hard") == "soft"))
-      "--with-__thread"
-    ] ++ lib.optionals (stdenv.hostPlatform == stdenv.buildPlatform && stdenv.hostPlatform.isAarch32) [
-      "--host=arm-linux-gnueabi"
-      "--build=arm-linux-gnueabi"
-
-      # To avoid linking with -lgcc_s (dynamic link)
-      # so the glibc does not depend on its compiler store path
-      "libc_cv_as_needed=no"
-    ]
-    ++ lib.optional withGd "--with-gd"
-    ++ lib.optional (!withLibcrypt) "--disable-crypt";
+      "--localedir=/var/run/current-system/sw/lib/locale"
+      "libc_cv_ssp=no"
+      "--without-headers"
+      (if profilingLibraries
+       then "--enable-profile"
+       else "--disable-profile")
+    ];
 
   makeFlags = [
     "OBJCOPY=${stdenv.cc.targetPrefix}objcopy"
