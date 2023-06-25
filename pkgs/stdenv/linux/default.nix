@@ -286,7 +286,7 @@ rec {
     extraAttrs = {
       inherit (stdenvLinuxBoot3Pkgs) glibc;
       inherit platform bootstrapTools;
-      shellPackage = stdenvLinuxBoot4Pkgs.bash; 
+      shellPackage = stdenvLinuxBoot4Pkgs.bash;
     };
 
     overrides = pkgs: {

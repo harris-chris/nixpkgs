@@ -2161,7 +2161,7 @@ let
       enableMultilib = true;
     })) else throw "Multilib gcc not supported on this system";
 
-  gcc47_real = lowPrio (wrapGCC (callPackage ../development/compilers/gcc/4.7 {
+  gcc47_real = wrapGCC (callPackage ../development/compilers/gcc/4.7 {
     inherit noSysDirs;
     # I'm not sure if profiling with enableParallelBuilding helps a lot.
     # We can enable it back some day. This makes the *gcc* builds faster now.
@@ -2176,7 +2176,7 @@ let
       if crossSystem != null && crossSystem.config == "i586-pc-gnu"
       then gnu.libpthreadCross
       else null;
-  }));
+  });
 
   gcc47_debug = lowPrio (wrapGCC (callPackage ../development/compilers/gcc/4.7 {
     stripped = false;
@@ -2186,6 +2186,23 @@ let
     libcCross = null;
     binutilsCross = null;
   }));
+
+  gcc91 = wrapGCC (callPackage ../development/compilers/gcc/9.1 {
+    inherit noSysDirs;
+    # I'm not sure if profiling with enableParallelBuilding helps a lot.
+    # We can enable it back some day. This makes the *gcc* builds faster now.
+    profiledCompiler = false;
+
+    # When building `gcc.crossDrv' (a "Canadian cross", with host == target
+    # and host != build), `cross' must be null but the cross-libc must still
+    # be passed.
+    cross = null;
+    libcCross = if crossSystem != null then libcCross else null;
+    libpthreadCross =
+      if crossSystem != null && crossSystem.config == "i586-pc-gnu"
+      then gnu.libpthreadCross
+      else null;
+  });
 
   gccApple =
     assert stdenv.isDarwin;
@@ -5928,7 +5945,7 @@ let
 
   linuxPackagesFor = kernel:
     let
-      callPackage = newScope self; 
+      callPackage = newScope self;
 
       self = {
         kernel = kernel.dev or kernel;

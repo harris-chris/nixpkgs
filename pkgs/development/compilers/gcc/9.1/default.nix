@@ -49,7 +49,7 @@ assert langGo -> langCC;
 with stdenv.lib;
 with builtins;
 
-let version = "4.7.2";
+let version = "9.1.0";
 
     # Whether building a cross-compiler for GNU/Hurd.
     crossGNU = cross != null && cross.config == "i586-pc-gnu";
@@ -195,50 +195,14 @@ stdenv.mkDerivation ({
   builder = ./builder.sh;
 
   src = fetchurl {
-    url = "mirror://gnu/gcc/gcc-${version}/gcc-${version}.tar.bz2";
-    sha256 = "115h03hil99ljig8lkrq4qk426awmzh0g99wrrggxf8g07bq74la";
+    url = "https://ftp.gnu.org/gnu/gcc/gcc-9.1.0/gcc-9.1.0.tar.gz";
+    sha256 = "sha256-vjA/eoKSmCo1OBSJ9akXhgPL6aRxXuT6SoFda80rZY0=";
   };
 
   inherit patches;
 
   postPatch =
-    if (stdenv.isGNU
-        || (libcCross != null                  # e.g., building `gcc.crossDrv'
-            && libcCross ? crossConfig
-            && libcCross.crossConfig == "i586-pc-gnu")
-        || (crossGNU && libcCross != null))
-    then
-      # On GNU/Hurd glibc refers to Hurd & Mach headers and libpthread is not
-      # in glibc, so add the right `-I' flags to the default spec string.
-      assert libcCross != null -> libpthreadCross != null;
-      let
-        libc = if libcCross != null then libcCross else stdenv.glibc;
-        gnu_h = "gcc/config/gnu.h";
-        extraCPPDeps =
-             libc.propagatedBuildInputs
-          ++ stdenv.lib.optional (libpthreadCross != null) libpthreadCross
-          ++ stdenv.lib.optional (libpthread != null) libpthread;
-        extraCPPSpec =
-          concatStrings (intersperse " "
-                          (map (x: "-I${x}/include") extraCPPDeps));
-        extraLibSpec =
-          if libpthreadCross != null
-          then "-L${libpthreadCross}/lib ${libpthreadCross.TARGET_LDFLAGS}"
-          else "-L${libpthread}/lib";
-      in
-        '' echo "augmenting \`CPP_SPEC' in \`${gnu_h}' with \`${extraCPPSpec}'..."
-           sed -i "${gnu_h}" \
-               -es'|CPP_SPEC *"\(.*\)$|CPP_SPEC "${extraCPPSpec} \1|g'
-
-           echo "augmenting \`LIB_SPEC' in \`${gnu_h}' with \`${extraLibSpec}'..."
-           sed -i "${gnu_h}" \
-               -es'|LIB_SPEC *"\(.*\)$|LIB_SPEC "${extraLibSpec} \1|g'
-
-           echo "setting \`NATIVE_SYSTEM_HEADER_DIR' and \`STANDARD_INCLUDE_DIR' to \`${libc}/include'..."
-           sed -i "${gnu_h}" \
-               -es'|#define STANDARD_INCLUDE_DIR.*$|#define STANDARD_INCLUDE_DIR "${libc}/include"|g'
-        ''
-    else if cross != null || stdenv.gcc.libc != null then
+    if cross != null || stdenv.gcc.libc != null then
       # On NixOS, use the right path to the dynamic linker instead of
       # `/lib/ld*.so'.
       let
@@ -271,10 +235,6 @@ stdenv.mkDerivation ({
     ++ (optionals (cross != null) [binutilsCross])
     ++ (optionals langAda [gnatboot])
     ++ (optionals langVhdl [gnat])
-
-    # The builder relies on GNU sed (for instance, Darwin's `sed' fails with
-    # "-i may not be used with stdin"), and `stdenvNative' doesn't provide it.
-    ++ (optional stdenv.isDarwin gnused)
     ;
 
   configureFlagsArray = stdenv.lib.optionals
@@ -290,18 +250,6 @@ stdenv.mkDerivation ({
     ${if enableShared then "" else "--disable-shared"}
     ${if enablePlugin then "--enable-plugin" else ""}
     ${if ppl != null then "--with-ppl=${ppl}" else ""}
-    ${if cloog != null then
-      "--with-cloog=${cloog} --enable-cloog-backend=isl"
-      else ""}
-    ${if langJava then
-      "--with-ecj-jar=${javaEcj} " +
-
-      # Follow Sun's layout for the convenience of IcedTea/OpenJDK.  See
-      # <http://mail.openjdk.java.net/pipermail/distro-pkg-dev/2010-April/008888.html>.
-      "--enable-java-home --with-java-home=\${prefix}/lib/jvm/jre "
-      else ""}
-    ${if javaAwtGtk then "--enable-java-awt=gtk" else ""}
-    ${if langJava && javaAntlr != null then "--with-antlr-jar=${javaAntlr}" else ""}
     --with-gmp=${gmp}
     --with-mpfr=${mpfr}
     --with-mpc=${mpc}
