@@ -89,6 +89,8 @@ self: super: {
 
     pgrouting = super.callPackage ./pgrouting.nix { };
 
+    pguint = super.callPackage ./pguint.nix { };
+
     pg_partman = super.callPackage ./pg_partman.nix { };
 
     pg_relusage = super.callPackage ./pg_relusage.nix { };
